@@ -2,14 +2,14 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use http::Method;
-use url::Url;
 #[cfg(feature = "json")]
 use serde::Serialize;
+use url::Url;
 
 use super::{Body, Client, Response};
-use crate::header::{HeaderMap, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use crate::header::CONTENT_TYPE;
+use crate::header::{HeaderMap, HeaderName, HeaderValue};
 
 /// A request which can be executed with `Client::execute()`.
 pub struct Request {
@@ -111,6 +111,27 @@ impl RequestBuilder {
         self
     }
 
+    /// Send a form body.
+    pub fn form<T: Serialize + ?Sized>(mut self, form: &T) -> RequestBuilder {
+        let mut error = None;
+        if let Ok(ref mut req) = self.request {
+            match serde_urlencoded::to_string(form) {
+                Ok(body) => {
+                    req.headers_mut().insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/x-www-form-urlencoded"),
+                    );
+                    *req.body_mut() = Some(body.into());
+                }
+                Err(err) => error = Some(crate::error::builder(err)),
+            }
+        }
+        if let Some(err) = error {
+            self.request = Err(err);
+        }
+        self
+    }
+
     /// Set the request body.
     pub fn body<T: Into<Body>>(mut self, body: T) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {
@@ -184,6 +205,15 @@ impl RequestBuilder {
     pub async fn send(self) -> crate::Result<Response> {
         let req = self.request?;
         self.client.execute_request(req).await
+    }
+
+    /// Enable HTTP bearer authentication.
+    pub fn bearer_auth<T>(self, token: T) -> RequestBuilder
+    where
+        T: fmt::Display,
+    {
+        let header_value = format!("Bearer {}", token);
+        self.header(crate::header::AUTHORIZATION, header_value)
     }
 }
 
